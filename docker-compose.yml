@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # RustFS S3-compatible object storage
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs-server
+    security_opt:
+      - "no-new-privileges:true"
+    ports:
+      - "9000:9000"  # S3 API port
+      - "9001:9001"  # Console UI port
+    environment:
+      # RustFS requires multiple data volumes
+      - RUSTFS_VOLUMES=/data/rustfs{0...3}
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+      - RUSTFS_OBS_LOGGER_LEVEL=info
+      # Bypass disk topology checks for local development
+      - RUSTFS_UNSAFE_BYPASS_DISK_CHECK=true
+    volumes:
+      - rustfs_data_0:/data/rustfs0
+      - rustfs_data_1:/data/rustfs1
+      - rustfs_data_2:/data/rustfs2
+      - rustfs_data_3:/data/rustfs3
+      - rustfs_logs:/app/logs
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh", "-ec",
+          "host=\"$${RUSTFS_HEALTHCHECK_HOST:-127.0.0.1}\"; scheme=\"http\"; set -- -fsS; \
+          curl \"$${@}\" \"$${scheme}://$${host}:9000/health\" && \
+          curl \"$${@}\" \"$${scheme}://$${host}:9001/rustfs/console/health\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # RustFS volume permissions fixer (runs once on startup)
+  volume-permission-helper:
+    image: alpine
+    volumes:
+      - rustfs_data_0:/data0
+      - rustfs_data_1:/data1
+      - rustfs_data_2:/data2
+      - rustfs_data_3:/data3
+      - rustfs_logs:/logs
+    command: >
+      sh -c "
+        chown -R 10001:10001 /data0 /data1 /data2 /data3 /logs &&
+        echo 'RustFS volume permissions fixed (UID:GID 10001:10001)' &&
+        exit 0
+      "
+    restart: "no"
+
+  # FastAPI web application
+  web:
+    build: .
+    container_name: fastapi-app
+    ports:
+      - "8000:8000"
+    environment:
+      - S3_ENDPOINT=https://s3-int-1.nina.no
+      - S3_PUBLIC_ENDPOINT=https://s3-int-1.nina.no
+      - S3_ACCESS_KEY=
+      - S3_SECRET_KEY=
+      - S3_BUCKET_NAME=
+      - S3_REGION=us-east-1
+      - PRESIGNED_URL_EXPIRATION=3600
+      - DEBUG=true
+    volumes:
+      - ./app:/app/app  # Mount for hot reload
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  rustfs_data_0:
+    driver: local
+  rustfs_data_1:
+    driver: local
+  rustfs_data_2:
+    driver: local
+  rustfs_data_3:
+    driver: local
+  rustfs_logs:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

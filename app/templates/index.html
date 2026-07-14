@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    
+    <!-- Uppy CSS -->
+    <link href="https://releases.transloadit.com/uppy/v5.2.1/uppy.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1rem;
+        }
+        
+        #uppy-dashboard {
+            margin-top: 20px;
+        }
+        
+        .info-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 30px;
+            border-radius: 4px;
+        }
+        
+        .info-box h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .info-box ul {
+            color: #666;
+            padding-left: 20px;
+        }
+        
+        .info-box li {
+            margin: 5px 0;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .prefix-input-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .prefix-input-container label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .prefix-input-container input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+        
+        .prefix-input-container input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .prefix-input-container .help-text {
+            margin-top: 5px;
+            font-size: 0.85rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>S3 Direct Upload Demo</h1>
+        <p class="subtitle">Upload files directly to S3-compatible storage using presigned URLs</p>
+        
+        <!-- Prefix/Folder input -->
+        <div class="prefix-input-container">
+            <label for="prefix-input">Upload Path (Optional)</label>
+            <input 
+                type="text" 
+                id="prefix-input" 
+                placeholder="e.g., images/2024, documents, data/exports"
+                value=""
+            >
+            <div class="help-text">
+                Specify a folder path where files will be uploaded. Leave empty to upload to the root.
+                Examples: "images", "docs/2024", "user-uploads/john"
+            </div>
+        </div>
+        
+        <!-- Uppy Dashboard will be rendered here -->
+        <div id="uppy-dashboard"></div>
+        
+        <!-- Success message -->
+        <div id="success-message" class="success-message">
+            <strong>Success!</strong> Your files have been uploaded successfully.
+        </div>
+        
+        <!-- Info box -->
+        <div class="info-box">
+            <h3>Features</h3>
+            <ul>
+                <li>Direct browser-to-S3 uploads using presigned URLs</li>
+                <li>Custom upload path/folder organization (prefix support)</li>
+                <li>Automatic multipart upload for files larger than 100MB</li>
+                <li>Drag & drop or click to select files</li>
+                <li>Upload progress tracking with pause/resume</li>
+                <li>Multiple file upload support</li>
+                <li>Automatic retry on failure</li>
+            </ul>
+        </div>
+        
+        <div class="footer">
+            Powered by <a href="https://uppy.io" target="_blank">Uppy</a>, 
+            <a href="https://fastapi.tiangolo.com" target="_blank">FastAPI</a>, and 
+            <a href="https://github.com/rustfs/rustfs" target="_blank">RustFS</a>
+        </div>
+    </div>
+
+    <!-- Uppy JavaScript -->
+    <script type="module">
+        import { Uppy, Dashboard, AwsS3 } from 'https://releases.transloadit.com/uppy/v5.2.1/uppy.min.mjs';
+
+        // Initialize Uppy
+        const uppy = new Uppy({
+            debug: true,
+            autoProceed: false,
+            restrictions: {
+                maxFileSize: null,
+                maxNumberOfFiles: 20,
+                minNumberOfFiles: 1,
+            },
+            onBeforeFileAdded: (currentFile, files) => {
+                console.log('File added:', currentFile.name);
+                return currentFile;
+            }
+        })
+        .use(Dashboard, {
+            inline: true,
+            target: '#uppy-dashboard',
+            showProgressDetails: true,
+            proudlyDisplayPoweredByUppy: false,
+            height: 470,
+            theme: 'light',
+            note: 'Upload files directly to S3-compatible storage',
+            browserBackButtonClose: false,
+        })
+        .use(AwsS3, {
+            shouldUseMultipart: (file) => file.size > 100 * 1024 * 1024, // 100MB
+            limit: 4, // Max concurrent uploads
+            
+            // For single file uploads
+            async getUploadParameters(file) {
+                console.log('Getting upload parameters for:', file.name);
+                
+                // Get prefix from input field
+                const prefix = document.getElementById('prefix-input').value.trim();
+                
+                try {
+                    const response = await fetch('/s3/params', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            filename: file.name,
+                            contentType: file.type,
+                            prefix: prefix || null,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Server error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    console.log('Received presigned URL for:', file.name);
+                    
+                    return {
+                        method: data.method,
+                        url: data.url,
+                        fields: {},
+                        headers: data.headers || {},
+                    };
+                } catch (error) {
+                    console.error('Error getting upload parameters:', error);
+                    throw error;
+                }
+            },
+
+            // For multipart uploads
+            async createMultipartUpload(file) {
+                console.log('Creating multipart upload for:', file.name);
+                
+                // Get prefix from input field
+                const prefix = document.getElementById('prefix-input').value.trim();
+                
+                // Build query parameters
+                const params = new URLSearchParams({
+                    key: file.name,
+                    type: file.type || '',
+                });
+                
+                if (prefix) {
+                    params.append('prefix', prefix);
+                }
+                
+                const response = await fetch(
+                    `/s3/multipart?${params.toString()}`,
+                    { method: 'POST' }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to create multipart upload: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('Created multipart upload:', data.uploadId);
+                return data;
+            },
+
+            async listParts(file, { uploadId, key }) {
+                console.log('Listing parts for upload:', uploadId);
+                
+                const response = await fetch(
+                    `/s3/multipart/${uploadId}?key=${encodeURIComponent(key)}`
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to list parts: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data;
+            },
+
+            async signPart(file, { uploadId, key, partNumber }) {
+                console.log(`Signing part ${partNumber} for upload:`, uploadId);
+                
+                const response = await fetch(
+                    `/s3/multipart/${uploadId}/${partNumber}?key=${encodeURIComponent(key)}`
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to sign part: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data;
+            },
+
+            async completeMultipartUpload(file, { uploadId, key, parts }) {
+                console.log('Completing multipart upload:', uploadId);
+                
+                const response = await fetch(
+                    `/s3/multipart/${uploadId}/complete?key=${encodeURIComponent(key)}`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ parts }),
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to complete multipart upload: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('Multipart upload completed:', data.location);
+                return data;
+            },
+
+            async abortMultipartUpload(file, { uploadId, key }) {
+                console.log('Aborting multipart upload:', uploadId);
+                
+                const response = await fetch(
+                    `/s3/multipart/${uploadId}?key=${encodeURIComponent(key)}`,
+                    { method: 'DELETE' }
+                );
+
+                // Don't throw on abort failure, just log
+                if (!response.ok) {
+                    console.warn('Failed to abort multipart upload:', response.status);
+                }
+            },
+        });
+
+        // Event handlers
+        uppy.on('file-added', (file) => {
+            console.log('Added file:', file.name);
+            document.getElementById('success-message').style.display = 'none';
+        });
+
+        uppy.on('upload-progress', (file, progress) => {
+            const percentage = Math.round((progress.bytesUploaded / progress.bytesTotal) * 100);
+            console.log(`Upload progress for ${file.name}: ${percentage}%`);
+        });
+
+        uppy.on('upload-success', (file, response) => {
+            console.log('Upload successful:', file.name);
+            console.log('Response:', response);
+        });
+
+        uppy.on('complete', (result) => {
+            console.log('Upload complete! Successful uploads:', result.successful.length);
+            console.log('Failed uploads:', result.failed.length);
+            
+            if (result.successful.length > 0) {
+                const successMessage = document.getElementById('success-message');
+                successMessage.style.display = 'block';
+                
+                // Hide success message after 5 seconds
+                setTimeout(() => {
+                    successMessage.style.display = 'none';
+                }, 5000);
+            }
+            
+            // Log uploaded file locations
+            result.successful.forEach((file) => {
+                console.log('Uploaded file location:', file.uploadURL);
+            });
+        });
+
+        uppy.on('upload-error', (file, error, response) => {
+            console.error('Upload error for', file?.name, ':', error);
+            console.error('Response:', response);
+        });
+
+        uppy.on('error', (error) => {
+            console.error('Uppy error:', error);
+        });
+
+        // Make uppy available globally for debugging
+        window.uppy = uppy;
+    </script>
+</body>
+</html>
